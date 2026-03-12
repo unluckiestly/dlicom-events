@@ -1,142 +1,122 @@
 const { Events } = require('discord.js');
+const hostPanel = require('../handlers/hostPanel');
+const tournaments = require('../handlers/tournaments');
+const teamPanel = require('../handlers/teamPanel');
 
 module.exports = {
   name: Events.InteractionCreate,
   async execute(interaction) {
-    // --- Slash commands ---
-    if (interaction.isChatInputCommand()) {
-      const command = interaction.client.commands.get(interaction.commandName);
-      if (!command) return;
-
-      try {
-        await command.execute(interaction);
-      } catch (error) {
-        console.error(`Error executing /${interaction.commandName}:`, error);
-        const reply = { content: 'Something went wrong.', ephemeral: true };
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp(reply).catch(() => {});
-        } else {
-          await interaction.reply(reply).catch(() => {});
-        }
-      }
-      return;
-    }
-
-    // --- Modal submits ---
-    if (interaction.isModalSubmit()) {
-      if (interaction.customId === 'modal_create_tournament') {
-        const host = require('../commands/host');
-        return host.handleModalSubmit(interaction);
-      }
-      return;
-    }
-
-    // --- Buttons ---
-    if (interaction.isButton()) {
-      const [action, ...rest] = interaction.customId.split(':');
-      const id = rest.join(':');
-
-      // Tournament buttons from the persistent embed
-      if (action === 'join') {
-        return handleJoinButton(interaction, id);
-      }
-      if (action === 'bracket') {
-        return handleBracketButton(interaction, id);
-      }
-      if (action === 'status') {
-        return handleStatusButton(interaction, id);
+    try {
+      // --- Buttons ---
+      if (interaction.isButton()) {
+        return await routeButton(interaction);
       }
 
-      // Team invite buttons
-      if (action === 'team_accept' || action === 'team_decline') {
-        const team = require('../commands/team');
-        const buttonAction = action === 'team_accept' ? 'accept' : 'decline';
-        return team.handleInviteButton(interaction, buttonAction, id);
+      // --- Select menus (string) ---
+      if (interaction.isStringSelectMenu()) {
+        return await routeStringSelect(interaction);
       }
-      return;
-    }
 
-    // --- Select menus ---
-    if (interaction.isStringSelectMenu()) {
-      const [action, ...rest] = interaction.customId.split(':');
-      const id = rest.join(':');
-
-      if (action === 'team_select') {
-        const player = require('../commands/player');
-        return player.handleTeamSelect(interaction, id);
+      // --- Select menus (user) ---
+      if (interaction.isUserSelectMenu()) {
+        return await routeUserSelect(interaction);
       }
-      return;
+
+      // --- Modal submits ---
+      if (interaction.isModalSubmit()) {
+        return await routeModal(interaction);
+      }
+    } catch (error) {
+      console.error(`Interaction error [${interaction.customId || interaction.type}]:`, error);
+      const msg = { content: `Something went wrong: ${error.message}`, ephemeral: true };
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp(msg).catch(() => {});
+      } else {
+        await interaction.reply(msg).catch(() => {});
+      }
     }
   },
 };
 
-// --- Button handlers for the persistent tournaments embed ---
+async function routeButton(interaction) {
+  const id = interaction.customId;
 
-const db = require('../db');
-const { refreshTournamentsEmbed } = require('../handlers/tournaments');
-const { formatBracket } = require('../handlers/bracket');
-const { EmbedBuilder } = require('discord.js');
+  // Host panel
+  if (id === 'host_create') return hostPanel.showCreateModal(interaction);
+  if (id === 'host_start') return hostPanel.showStartSelect(interaction);
+  if (id === 'host_result') return hostPanel.showResultSelect(interaction);
+  if (id === 'host_end') return hostPanel.showEndSelect(interaction);
 
-async function handleJoinButton(interaction, tournamentId) {
-  await interaction.deferReply({ ephemeral: true });
-
-  const tid = parseInt(tournamentId, 10);
-  const tournament = db.getTournament.get(tid);
-  if (!tournament) return interaction.editReply('Tournament not found.');
-  if (tournament.status !== 'open') return interaction.editReply('Tournament is not open.');
-
-  const count = db.getParticipantCount.get(tid).count;
-  if (count >= tournament.max_participants) return interaction.editReply('Tournament is full.');
-
-  const existing = db.getParticipant.get(tid, interaction.user.id);
-  if (existing) return interaction.editReply('You are already registered.');
-
-  if (tournament.type === 'solo') {
-    db.insertParticipant.run(tid, interaction.user.id, null);
-    await refreshTournamentsEmbed(interaction.client);
-    return interaction.editReply(`You joined **${tournament.name}**!`);
+  if (id.startsWith('host_winner:')) {
+    const parts = id.split(':');
+    return hostPanel.handleWinner(interaction, parts[1], parts[2]);
   }
 
-  // Team tournament — prompt to use /player join for team selection
-  return interaction.editReply(
-    `This is a team tournament. Use \`/player join ${tid}\` to select which team to register.`,
-  );
+  // Tournament player actions
+  if (id === 't_join') return tournaments.showJoinSelect(interaction);
+  if (id === 't_participants') return tournaments.showParticipantsSelect(interaction);
+  if (id === 't_status') return tournaments.showStatusSelect(interaction);
+
+  // Team panel
+  if (id === 'team_create') return teamPanel.showCreateModal(interaction);
+  if (id === 'team_my') return teamPanel.showMyTeams(interaction);
+
+  if (id.startsWith('team_invite:')) {
+    return teamPanel.showInviteUserSelect(interaction, id.split(':')[1]);
+  }
+  if (id.startsWith('team_kick:')) {
+    return teamPanel.showKickSelect(interaction, id.split(':')[1]);
+  }
+  if (id.startsWith('team_leave:')) {
+    return teamPanel.handleLeave(interaction, id.split(':')[1]);
+  }
+  if (id.startsWith('team_disband:')) {
+    return teamPanel.handleDisband(interaction, id.split(':')[1]);
+  }
+  if (id.startsWith('team_accept:')) {
+    return teamPanel.handleAccept(interaction, id.split(':')[1]);
+  }
+  if (id.startsWith('team_decline:')) {
+    return teamPanel.handleDecline(interaction, id.split(':')[1]);
+  }
 }
 
-async function handleBracketButton(interaction, tournamentId) {
-  await interaction.deferReply({ ephemeral: true });
+async function routeStringSelect(interaction) {
+  const id = interaction.customId;
 
-  const tid = parseInt(tournamentId, 10);
-  const tournament = db.getTournament.get(tid);
-  if (!tournament) return interaction.editReply('Tournament not found.');
+  // Host selects
+  if (id === 'host_start_select') return hostPanel.handleStart(interaction);
+  if (id === 'host_result_select') return hostPanel.handleResultSelect(interaction);
+  if (id === 'host_end_select') return hostPanel.handleEnd(interaction);
 
-  const text = formatBracket(tid);
-  const embed = new EmbedBuilder()
-    .setTitle(`Bracket: ${tournament.name}`)
-    .setDescription(text)
-    .setColor(0x5865f2);
+  // Player tournament selects
+  if (id === 't_join_select') return tournaments.handleJoin(interaction);
+  if (id === 't_participants_select') return tournaments.handleParticipantsSelect(interaction);
+  if (id === 't_status_select') return tournaments.handleStatus(interaction);
 
-  return interaction.editReply({ embeds: [embed] });
+  if (id.startsWith('t_team_select:')) {
+    return tournaments.handleTeamSelect(interaction, id.split(':')[1]);
+  }
+
+  // Team selects
+  if (id === 'team_action_select') return teamPanel.showTeamActions(interaction);
+
+  if (id.startsWith('team_kick_select:')) {
+    return teamPanel.handleKick(interaction, id.split(':')[1]);
+  }
 }
 
-async function handleStatusButton(interaction, tournamentId) {
-  await interaction.deferReply({ ephemeral: true });
+async function routeUserSelect(interaction) {
+  const id = interaction.customId;
 
-  const tid = parseInt(tournamentId, 10);
-  const tournament = db.getTournament.get(tid);
-  if (!tournament) return interaction.editReply('Tournament not found.');
+  if (id.startsWith('team_invite_user:')) {
+    return teamPanel.handleInviteUser(interaction, id.split(':')[1]);
+  }
+}
 
-  const participant = db.getParticipant.get(tid, interaction.user.id);
-  if (!participant) return interaction.editReply('You are not registered in this tournament.');
+async function routeModal(interaction) {
+  const id = interaction.customId;
 
-  const statusLabels = {
-    registered: '📋 Registered',
-    active: '⚔️ In Bracket',
-    eliminated: '❌ Eliminated',
-    winner: '🏆 Winner',
-  };
-
-  return interaction.editReply(
-    `**${tournament.name}** — ${statusLabels[participant.status] || participant.status}`,
-  );
+  if (id === 'modal_create_tournament') return hostPanel.handleCreateSubmit(interaction);
+  if (id === 'modal_create_team') return teamPanel.handleCreateSubmit(interaction);
 }

@@ -1,11 +1,16 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const {
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+} = require('discord.js');
 const db = require('../db');
 const config = require('../config');
 
 /**
- * Fetches all open/active tournaments, builds embeds + button rows,
- * and edits the persistent message in the tournaments channel.
- * Creates the message on first call and stores its id in bot_state.
+ * Persistent embed in #tournaments.
+ * Shows all open/active tournaments + generic action buttons + team buttons.
  */
 async function refreshTournamentsEmbed(client) {
   const channel = await client.channels.fetch(config.TOURNAMENTS_CHANNEL_ID).catch(() => null);
@@ -14,7 +19,6 @@ async function refreshTournamentsEmbed(client) {
   const tournaments = db.getOpenActiveTournaments.all();
 
   const embeds = [];
-  const rows = [];
 
   if (tournaments.length === 0) {
     embeds.push(
@@ -28,63 +32,279 @@ async function refreshTournamentsEmbed(client) {
     for (const t of tournaments) {
       const typeBadge = t.type === 'solo' ? '🎮 Solo' : '👥 Team';
       const statusBadge = t.status === 'open' ? '🟢 Open' : '🟡 Active';
-      const full = t.participant_count >= t.max_participants;
 
       embeds.push(
         new EmbedBuilder()
-          .setTitle(`${t.name}`)
+          .setTitle(t.name)
           .setDescription(
             `${typeBadge} · ${t.format} · ${statusBadge}\n` +
-            `Participants: **${t.participant_count}/${t.max_participants}**\n` +
-            (t.end_date ? `Ends: ${t.end_date}` : ''),
+            `Participants: **${t.participant_count}/${t.max_participants}**` +
+            (t.end_date ? `\nEnds: ${t.end_date}` : ''),
           )
           .setColor(t.status === 'open' ? 0x57f287 : 0xfee75c)
           .setFooter({ text: `ID: ${t.id}` }),
       );
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`join:${t.id}`)
-          .setLabel('Join')
-          .setStyle(ButtonStyle.Success)
-          .setDisabled(full || t.status !== 'open'),
-        new ButtonBuilder()
-          .setCustomId(`bracket:${t.id}`)
-          .setLabel('View Bracket')
-          .setStyle(ButtonStyle.Primary)
-          .setDisabled(t.status === 'open'),
-        new ButtonBuilder()
-          .setCustomId(`status:${t.id}`)
-          .setLabel('My Status')
-          .setStyle(ButtonStyle.Secondary),
-      );
-      rows.push(row);
     }
   }
 
-  // Cap at 10 embeds / 5 action rows per message (Discord limits)
+  // Row 1: tournament actions
+  const tournamentRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('t_join').setLabel('Join Tournament').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('t_participants').setLabel('Participants').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('t_status').setLabel('My Status').setStyle(ButtonStyle.Secondary),
+  );
+
+  // Row 2: team management
+  const teamRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('team_create').setLabel('Create Team').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('team_my').setLabel('My Teams').setStyle(ButtonStyle.Secondary),
+  );
+
   const payload = {
     content: '',
     embeds: embeds.slice(0, 10),
-    components: rows.slice(0, 5),
+    components: [tournamentRow, teamRow],
   };
 
-  // Try to edit the cached persistent message
+  // Edit existing or post new
   const stateRow = db.getState.get('tournaments_message_id');
   if (stateRow) {
     try {
       const msg = await channel.messages.fetch(stateRow.value);
       await msg.edit(payload);
       return;
-    } catch {
-      // Message was deleted — fall through and post a new one
-    }
+    } catch { /* deleted — fall through */ }
   }
 
-  // Post a new message and cache its id
   const msg = await channel.send(payload);
   db.setState.run('tournaments_message_id', msg.id);
   try { await msg.pin(); } catch { /* already pinned or no perms */ }
 }
 
-module.exports = { refreshTournamentsEmbed };
+// --- Player button handlers ---
+
+async function showJoinSelect(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const tournaments = db.getOpenActiveTournaments.all().filter(t => {
+    if (t.status !== 'open') return false;
+    if (t.participant_count >= t.max_participants) return false;
+    return true;
+  });
+
+  if (tournaments.length === 0) {
+    return interaction.editReply('No tournaments open for registration right now.');
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('t_join_select')
+      .setPlaceholder('Select tournament')
+      .addOptions(tournaments.map(t => ({
+        label: `${t.name} — ${t.format} (${t.participant_count}/${t.max_participants})`,
+        value: String(t.id),
+      }))),
+  );
+
+  return interaction.editReply({ content: 'Which tournament do you want to join?', components: [row] });
+}
+
+async function handleJoin(interaction) {
+  await interaction.deferUpdate();
+
+  const tournamentId = parseInt(interaction.values[0], 10);
+  const tournament = db.getTournament.get(tournamentId);
+  if (!tournament) return interaction.editReply({ content: 'Tournament not found.', components: [] });
+  if (tournament.status !== 'open') return interaction.editReply({ content: 'Not open.', components: [] });
+
+  const count = db.getParticipantCount.get(tournamentId).count;
+  if (count >= tournament.max_participants) return interaction.editReply({ content: 'Full.', components: [] });
+
+  const existing = db.getParticipant.get(tournamentId, interaction.user.id);
+  if (existing) return interaction.editReply({ content: 'Already registered.', components: [] });
+
+  if (tournament.type === 'solo') {
+    db.insertParticipant.run(tournamentId, interaction.user.id, null);
+    await refreshTournamentsEmbed(interaction.client);
+    return interaction.editReply({ content: `You joined **${tournament.name}**!`, components: [] });
+  }
+
+  // Team tournament — show team select
+  const teams = db.getTeamsByUser.all(interaction.user.id);
+  if (teams.length === 0) {
+    return interaction.editReply({ content: 'You need a team first. Use **Create Team**.', components: [] });
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`t_team_select:${tournamentId}`)
+      .setPlaceholder('Select your team')
+      .addOptions(teams.map(t => ({
+        label: `${t.name} (${t.size} players)`,
+        value: String(t.id),
+      }))),
+  );
+
+  return interaction.editReply({ content: 'Select which team to register:', components: [row] });
+}
+
+async function handleTeamSelect(interaction, tournamentId) {
+  await interaction.deferUpdate();
+
+  const tid = parseInt(tournamentId, 10);
+  const teamId = parseInt(interaction.values[0], 10);
+  const tournament = db.getTournament.get(tid);
+  if (!tournament) return interaction.editReply({ content: 'Tournament not found.', components: [] });
+
+  const existing = db.getParticipant.get(tid, interaction.user.id);
+  if (existing) return interaction.editReply({ content: 'Already registered.', components: [] });
+
+  // Register all team members
+  db.insertParticipant.run(tid, interaction.user.id, teamId);
+  const members = db.getTeamMembers.all(teamId);
+  for (const m of members) {
+    if (m.user_id === interaction.user.id) continue;
+    if (!db.getParticipant.get(tid, m.user_id)) {
+      db.insertParticipant.run(tid, m.user_id, teamId);
+    }
+  }
+
+  await refreshTournamentsEmbed(interaction.client);
+  const team = db.getTeam.get(teamId);
+  return interaction.editReply({ content: `Team **${team.name}** registered for **${tournament.name}**!`, components: [] });
+}
+
+// --- Participants list ---
+
+async function showParticipantsSelect(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const tournaments = db.getOpenActiveTournaments.all();
+  if (tournaments.length === 0) {
+    return interaction.editReply('No tournaments right now.');
+  }
+
+  if (tournaments.length === 1) {
+    return showParticipantsList(interaction, tournaments[0].id);
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('t_participants_select')
+      .setPlaceholder('Select tournament')
+      .addOptions(tournaments.map(t => ({
+        label: `${t.name} (${t.participant_count} participants)`,
+        value: String(t.id),
+      }))),
+  );
+
+  return interaction.editReply({ content: 'View participants for which tournament?', components: [row] });
+}
+
+async function handleParticipantsSelect(interaction) {
+  await interaction.deferUpdate();
+  const tournamentId = parseInt(interaction.values[0], 10);
+  return showParticipantsList(interaction, tournamentId);
+}
+
+async function showParticipantsList(interaction, tournamentId) {
+  const tournament = db.getTournament.get(tournamentId);
+  if (!tournament) {
+    return interaction.editReply({ content: 'Tournament not found.', components: [] });
+  }
+
+  const participants = db.getParticipantsByTournament.all(tournamentId);
+  if (participants.length === 0) {
+    return interaction.editReply({ content: `**${tournament.name}** — no participants yet.`, embeds: [], components: [] });
+  }
+
+  let description;
+  if (tournament.type === 'team') {
+    // Group by team
+    const teamMap = {};
+    for (const p of participants) {
+      const key = p.team_id || 'no_team';
+      if (!teamMap[key]) teamMap[key] = [];
+      teamMap[key].push(p);
+    }
+
+    const lines = [];
+    for (const [teamId, members] of Object.entries(teamMap)) {
+      if (teamId === 'no_team') {
+        lines.push('**No team:**');
+        for (const m of members) lines.push(`  <@${m.user_id}>`);
+      } else {
+        const team = db.getTeam.get(parseInt(teamId, 10));
+        const teamName = team ? team.name : `Team #${teamId}`;
+        lines.push(`**${teamName}:**`);
+        for (const m of members) lines.push(`  <@${m.user_id}>`);
+      }
+    }
+    description = lines.join('\n');
+  } else {
+    description = participants.map(p => `<@${p.user_id}>`).join('\n');
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${tournament.name} — Participants (${participants.length})`)
+    .setDescription(description.slice(0, 4096))
+    .setColor(0x5865f2);
+
+  return interaction.editReply({ content: '', embeds: [embed], components: [] });
+}
+
+// --- Status ---
+
+async function showStatusSelect(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const all = db.getOpenActiveTournaments.all();
+  const mine = all.filter(t => db.getParticipant.get(t.id, interaction.user.id));
+
+  if (mine.length === 0) {
+    return interaction.editReply('You are not registered in any active tournament.');
+  }
+
+  if (mine.length === 1) {
+    const p = db.getParticipant.get(mine[0].id, interaction.user.id);
+    const labels = { registered: '📋 Registered', active: '⚔️ In Bracket', eliminated: '❌ Eliminated', winner: '🏆 Winner' };
+    return interaction.editReply(`**${mine[0].name}** — ${labels[p.status] || p.status}`);
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('t_status_select')
+      .setPlaceholder('Select tournament')
+      .addOptions(mine.map(t => ({
+        label: t.name,
+        value: String(t.id),
+      }))),
+  );
+
+  return interaction.editReply({ content: 'Check status for which tournament?', components: [row] });
+}
+
+async function handleStatus(interaction) {
+  await interaction.deferUpdate();
+
+  const tournamentId = parseInt(interaction.values[0], 10);
+  const tournament = db.getTournament.get(tournamentId);
+  if (!tournament) return interaction.editReply({ content: 'Tournament not found.', components: [] });
+
+  const participant = db.getParticipant.get(tournamentId, interaction.user.id);
+  if (!participant) return interaction.editReply({ content: 'Not registered.', components: [] });
+
+  const labels = { registered: '📋 Registered', active: '⚔️ In Bracket', eliminated: '❌ Eliminated', winner: '🏆 Winner' };
+  return interaction.editReply({ content: `**${tournament.name}** — ${labels[participant.status] || participant.status}`, components: [] });
+}
+
+module.exports = {
+  refreshTournamentsEmbed,
+  showJoinSelect,
+  handleJoin,
+  handleTeamSelect,
+  showParticipantsSelect,
+  handleParticipantsSelect,
+  showStatusSelect,
+  handleStatus,
+};

@@ -14,7 +14,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     type TEXT NOT NULL CHECK(type IN ('solo', 'team')),
-    format TEXT NOT NULL CHECK(format IN ('1v1', 'battle-royale')),
+    format TEXT NOT NULL,
     max_participants INTEGER NOT NULL,
     end_date TEXT,
     status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'active', 'closed')),
