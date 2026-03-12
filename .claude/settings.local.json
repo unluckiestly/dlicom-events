@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd D:/dlicom-events && mkdir -p src/commands src/events src/handlers)",
+      "Bash(cd D:/dlicom-events && npm init -y && npm install discord.js better-sqlite3 dotenv)",
+      "Bash(cd D:/dlicom-events && node -e \"\n  require\\('./src/db'\\);\n  require\\('./src/config'\\);\n  require\\('./src/handlers/tournaments'\\);\n  require\\('./src/handlers/teams'\\);\n  require\\('./src/handlers/bracket'\\);\n  require\\('./src/commands/host'\\);\n  require\\('./src/commands/team'\\);\n  require\\('./src/commands/player'\\);\n  console.log\\('All modules loaded successfully'\\);\n\")",
+      "Bash(cd D:/dlicom-events && node -e \"require\\('./src/deploy.js'\\)\" 2>&1 | head -5)"
+    ]
+  }
+}
