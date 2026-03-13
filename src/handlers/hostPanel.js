@@ -13,7 +13,6 @@ const {
 const db = require('../db');
 const config = require('../config');
 const { refreshTournamentsEmbed } = require('./tournaments');
-const { generateBracket, advanceWinner } = require('./bracket');
 const logger = require('./logger');
 
 // --- Persistent host panel ---
@@ -31,7 +30,7 @@ async function postHostPanel(client) {
       'Manage tournaments from here.\n\n' +
       '**Create** — open a new tournament\n' +
       '**Edit** — edit an open tournament\n' +
-      '**Start** — lock registrations and generate bracket\n' +
+      '**Start** — lock registrations and begin tournament\n' +
       '**End** — force-close a tournament',
     )
     .setColor(0xed4245);
@@ -160,30 +159,6 @@ async function showStartSelect(interaction) {
   );
 
   return interaction.editReply({ content: 'Which tournament to start?', components: [row] });
-}
-
-async function showResultSelect(interaction) {
-  if (!isHost(interaction)) {
-    return interaction.reply({ content: 'You need the **Host** role.', ephemeral: true });
-  }
-  await interaction.deferReply({ ephemeral: true });
-
-  const tournaments = db.getOpenActiveTournaments.all().filter(t => t.status === 'active');
-  if (tournaments.length === 0) {
-    return interaction.editReply('No active tournaments.');
-  }
-
-  const row = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId('host_result_select')
-      .setPlaceholder('Select tournament')
-      .addOptions(tournaments.map(t => ({
-        label: t.name,
-        value: String(t.id),
-      }))),
-  );
-
-  return interaction.editReply({ content: 'Record result for which tournament?', components: [row] });
 }
 
 async function showEndSelect(interaction) {
@@ -385,7 +360,12 @@ async function handleStart(interaction) {
   if (count < 2) return interaction.editReply({ content: 'Need at least 2 participants.', components: [] });
 
   db.updateTournamentStatus.run('active', tournamentId);
-  generateBracket(tournamentId);
+
+  // Mark all participants as active
+  const participants = db.getParticipantsByTournament.all(tournamentId);
+  for (const p of participants) {
+    db.updateParticipantStatus.run('active', tournamentId, p.user_id);
+  }
 
   // Create private voice channels for teams
   if (tournament.type === 'team') {
@@ -395,75 +375,6 @@ async function handleStart(interaction) {
   await refreshTournamentsEmbed(interaction.client);
   await logger.log('tournament', 'Tournament Started', `**${tournament.name}** (${count} participants)\nBy: <@${interaction.user.id}>`);
   return interaction.editReply({ content: `**${tournament.name}** started!`, components: [] });
-}
-
-async function handleResultSelect(interaction) {
-  await interaction.deferUpdate();
-
-  const tournamentId = parseInt(interaction.values[0], 10);
-  const match = db.getNextUncompletedMatch.get(tournamentId);
-  if (!match) return interaction.editReply({ content: 'No pending matches.', components: [] });
-
-  if (!match.participant_a || !match.participant_b) {
-    return interaction.editReply({
-      content: `Next match (Round ${match.round}, Match ${match.match_index + 1}): waiting for participants.`,
-      components: [],
-    });
-  }
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`host_winner:${match.id}:${match.participant_a}`)
-      .setLabel(match.participant_a)
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId(`host_winner:${match.id}:${match.participant_b}`)
-      .setLabel(match.participant_b)
-      .setStyle(ButtonStyle.Success),
-  );
-
-  return interaction.editReply({
-    content: `**Round ${match.round}, Match ${match.match_index + 1}**\n\`${match.participant_a}\` vs \`${match.participant_b}\`\n\nPick the winner:`,
-    components: [row],
-  });
-}
-
-async function handleWinner(interaction, matchId, winnerId) {
-  await interaction.deferUpdate();
-
-  const match = db.getMatchById.get(parseInt(matchId, 10));
-  if (!match) return interaction.editReply({ content: 'Match not found.', components: [] });
-  if (match.completed) return interaction.editReply({ content: 'Match already completed.', components: [] });
-
-  if (winnerId !== match.participant_a && winnerId !== match.participant_b) {
-    return interaction.editReply({ content: 'Invalid winner.', components: [] });
-  }
-
-  db.updateMatchWinner.run(winnerId, match.id);
-
-  const loserId = winnerId === match.participant_a ? match.participant_b : match.participant_a;
-  if (loserId) {
-    db.updateParticipantStatus.run('eliminated', match.tournament_id, loserId);
-  }
-
-  advanceWinner(match.tournament_id, { ...match, winner: winnerId });
-
-  const remaining = db.getRemainingMatches.get(match.tournament_id).count;
-  const tournament = db.getTournament.get(match.tournament_id);
-
-  if (remaining === 0) {
-    db.updateTournamentStatus.run('closed', match.tournament_id);
-    db.updateParticipantStatus.run('winner', match.tournament_id, winnerId);
-    await cleanupVoiceChannels(match.tournament_id, interaction.guild);
-    await logger.log('tournament', 'Tournament Complete', `**${tournament.name}** — Winner: <@${winnerId}>`);
-  }
-
-  await refreshTournamentsEmbed(interaction.client);
-
-  const msg = remaining === 0
-    ? `**${tournament.name}** complete! Winner: <@${winnerId}>`
-    : `Result recorded. ${remaining} match(es) remaining.`;
-  return interaction.editReply({ content: msg, components: [] });
 }
 
 async function handleEnd(interaction) {
@@ -549,11 +460,8 @@ module.exports = {
   showEditModal,
   handleEditSubmit,
   showStartSelect,
-  showResultSelect,
   showEndSelect,
   handleCreateSubmit,
   handleStart,
-  handleResultSelect,
-  handleWinner,
   handleEnd,
 };

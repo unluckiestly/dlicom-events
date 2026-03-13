@@ -49,17 +49,6 @@ db.exec(`
     PRIMARY KEY (tournament_id, user_id)
   );
 
-  CREATE TABLE IF NOT EXISTS bracket_matches (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
-    round INTEGER NOT NULL,
-    match_index INTEGER NOT NULL,
-    participant_a TEXT,
-    participant_b TEXT,
-    winner TEXT,
-    completed INTEGER NOT NULL DEFAULT 0
-  );
-
   CREATE TABLE IF NOT EXISTS lft (
     tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
     user_id TEXT NOT NULL,
@@ -172,35 +161,6 @@ const updateTeamMemberRole = db.prepare(`
   UPDATE team_members SET role = ? WHERE team_id = ? AND user_id = ?
 `);
 
-// --- Bracket queries ---
-
-const insertBracketMatch = db.prepare(`
-  INSERT INTO bracket_matches (tournament_id, round, match_index, participant_a, participant_b)
-  VALUES (?, ?, ?, ?, ?)
-`);
-
-const getBracketMatches = db.prepare(`
-  SELECT * FROM bracket_matches WHERE tournament_id = ? ORDER BY round, match_index
-`);
-
-const getNextUncompletedMatch = db.prepare(`
-  SELECT * FROM bracket_matches WHERE tournament_id = ? AND completed = 0 ORDER BY round, match_index LIMIT 1
-`);
-
-const updateMatchWinner = db.prepare(`
-  UPDATE bracket_matches SET winner = ?, completed = 1 WHERE id = ?
-`);
-
-const getMatchById = db.prepare(`SELECT * FROM bracket_matches WHERE id = ?`);
-
-const getMatchesByRound = db.prepare(`
-  SELECT * FROM bracket_matches WHERE tournament_id = ? AND round = ? ORDER BY match_index
-`);
-
-const getRemainingMatches = db.prepare(`
-  SELECT COUNT(*) AS count FROM bracket_matches WHERE tournament_id = ? AND completed = 0
-`);
-
 // --- LFT queries ---
 
 const insertLft = db.prepare(`
@@ -252,13 +212,6 @@ module.exports = {
   removeTeamMember,
   updateTeamCaptain,
   updateTeamMemberRole,
-  insertBracketMatch,
-  getBracketMatches,
-  getNextUncompletedMatch,
-  updateMatchWinner,
-  getMatchById,
-  getMatchesByRound,
-  getRemainingMatches,
   insertLft,
   removeLft,
   getLftByTournament,

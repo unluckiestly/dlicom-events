@@ -65,15 +65,10 @@ async function routeButton(interaction) {
   if (id === 'host_create') return hostPanel.showCreateModal(interaction);
   if (id === 'host_edit') return hostPanel.showEditSelect(interaction);
   if (id === 'host_start') return hostPanel.showStartSelect(interaction);
-  if (id === 'host_result') return hostPanel.showResultSelect(interaction);
   if (id === 'host_end') return hostPanel.showEndSelect(interaction);
 
   if (id.startsWith('host_edit_open:')) {
     return hostPanel.showEditModal(interaction, id.split(':')[1]);
-  }
-  if (id.startsWith('host_winner:')) {
-    const parts = id.split(':');
-    return hostPanel.handleWinner(interaction, parts[1], parts[2]);
   }
 
   // Tournament player actions (require Verified)
@@ -121,7 +116,6 @@ async function routeStringSelect(interaction) {
   // Host selects
   if (id === 'host_edit_select') return hostPanel.handleEditSelect(interaction);
   if (id === 'host_start_select') return hostPanel.handleStart(interaction);
-  if (id === 'host_result_select') return hostPanel.handleResultSelect(interaction);
   if (id === 'host_end_select') return hostPanel.handleEnd(interaction);
 
   // Player tournament selects

@@ -9,7 +9,16 @@
       "Bash(cd D:/dlicom-events && node -e \"require\\('./src/handlers/hostPanel'\\); console.log\\('OK'\\)\")",
       "Bash(cd D:/dlicom-events && node -e \"\n  require\\('./src/handlers/logger'\\);\n  require\\('./src/handlers/hostPanel'\\);\n  require\\('./src/handlers/tournaments'\\);\n  require\\('./src/handlers/teamPanel'\\);\n  require\\('./src/events/messageReactionAdd'\\);\n  require\\('./src/events/ready'\\);\n  console.log\\('OK'\\);\n\")",
       "Bash(cd D:/dlicom-events && node -e \"require\\('./src/handlers/hostPanel'\\); require\\('./src/events/interactionCreate'\\); console.log\\('OK'\\)\")",
-      "Bash(cd D:/dlicom-events && node -e \"require\\('./src/handlers/tournaments'\\); require\\('./src/events/interactionCreate'\\); console.log\\('OK'\\)\")"
+      "Bash(cd D:/dlicom-events && node -e \"require\\('./src/handlers/tournaments'\\); require\\('./src/events/interactionCreate'\\); console.log\\('OK'\\)\")",
+      "Bash(find /d/dlicom-events -name \".env*\" -type f 2>/dev/null | head -5)",
+      "Bash(grep -r \"require.*hostPanel\\\\|require.*tournaments\\\\|require.*teamPanel\\\\|require.*teams\\\\|require.*bracket\" src/ --include=\"*.js\" 2>/dev/null | sort)",
+      "Bash(grep -r \"setCustomId\\\\|setLabel\" /d/dlicom-events/src/handlers/*.js | grep -o \"setLabel\\('[^']*'\\)\\\\|setCustomId\\('[^']*'\\)\" | sort | uniq -c | sort -rn | head -30)",
+      "Bash(grep -ro \"setLabel\\('[^']*'\\)\" /d/dlicom-events/src/handlers/*.js | sed \"s/setLabel\\('\\\\|'//g\" | while read line; do echo \"${#line}: $line\"; done | sort -rn | head -5)",
+      "Bash(grep -ro \"setCustomId\\('[^']*'\\)\" /d/dlicom-events/src/handlers/*.js | sed \"s/setCustomId\\('\\\\|'//g\" | while read line; do echo \"${#line}: $line\"; done | sort -rn | head -10)",
+      "Bash(grep -ro \"setCustomId\\(\\\\`[^\\\\`]*\\\\`\\)\" /d/dlicom-events/src/handlers/*.js | sed \"s/setCustomId\\(\\\\`\\\\|\\\\`//g\" | head -15)",
+      "Bash(grep -n \"getParticipantCount.get\" /d/dlicom-events/src/handlers/*.js)",
+      "Bash(grep \"module.exports\" /d/dlicom-events/src/handlers/*.js)",
+      "Bash(cd D:/dlicom-events && node -e \"require\\('./src/handlers/bracket'\\); require\\('./src/handlers/hostPanel'\\); require\\('./src/events/interactionCreate'\\); console.log\\('OK'\\)\")"
     ]
   }
 }
