@@ -14,6 +14,7 @@ const db = require('../db');
 const config = require('../config');
 const { refreshTournamentsEmbed } = require('./tournaments');
 const { generateBracket, advanceWinner } = require('./bracket');
+const logger = require('./logger');
 
 // --- Persistent host panel ---
 
@@ -29,16 +30,16 @@ async function postHostPanel(client) {
     .setDescription(
       'Manage tournaments from here.\n\n' +
       '**Create** — open a new tournament\n' +
+      '**Edit** — edit an open tournament\n' +
       '**Start** — lock registrations and generate bracket\n' +
-      '**Result** — record the next match winner\n' +
       '**End** — force-close a tournament',
     )
     .setColor(0xed4245);
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('host_create').setLabel('Create').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('host_edit').setLabel('Edit').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('host_start').setLabel('Start').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('host_result').setLabel('Result').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('host_end').setLabel('End').setStyle(ButtonStyle.Danger),
   );
 
@@ -209,6 +210,134 @@ async function showEndSelect(interaction) {
   return interaction.editReply({ content: 'Which tournament to close?', components: [row] });
 }
 
+// --- Edit tournament ---
+
+async function showEditSelect(interaction) {
+  if (!isHost(interaction)) {
+    return interaction.reply({ content: 'You need the **Host** role.', ephemeral: true });
+  }
+  await interaction.deferReply({ ephemeral: true });
+
+  const tournaments = db.getOpenActiveTournaments.all().filter(t => t.status === 'open');
+  if (tournaments.length === 0) {
+    return interaction.editReply('No open tournaments to edit.');
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('host_edit_select')
+      .setPlaceholder('Select tournament to edit')
+      .addOptions(tournaments.map(t => ({
+        label: t.name,
+        value: String(t.id),
+      }))),
+  );
+
+  return interaction.editReply({ content: 'Which tournament to edit?', components: [row] });
+}
+
+async function handleEditSelect(interaction) {
+  await interaction.deferUpdate();
+
+  const tournamentId = parseInt(interaction.values[0], 10);
+  const tournament = db.getTournament.get(tournamentId);
+  if (!tournament) return interaction.editReply({ content: 'Tournament not found.', components: [] });
+
+  const count = db.getParticipantCount.get(tournamentId).count;
+
+  const embed = new EmbedBuilder()
+    .setTitle(`Edit: ${tournament.name}`)
+    .setDescription(
+      `**Format:** ${tournament.format}\n` +
+      `**Max participants:** ${tournament.max_participants}\n` +
+      `**Registered:** ${count}\n` +
+      `**End date:** ${tournament.end_date || 'not set'}`,
+    )
+    .setColor(0x5865f2);
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`host_edit_open:${tournamentId}`)
+      .setLabel('Edit Details')
+      .setStyle(ButtonStyle.Primary),
+  );
+
+  return interaction.editReply({ content: '', embeds: [embed], components: [row] });
+}
+
+function showEditModal(interaction, tournamentId) {
+  const tournament = db.getTournament.get(parseInt(tournamentId, 10));
+  if (!tournament) {
+    return interaction.reply({ content: 'Tournament not found.', ephemeral: true });
+  }
+
+  const modal = new ModalBuilder()
+    .setCustomId(`modal_edit_tournament:${tournament.id}`)
+    .setTitle('Edit Tournament');
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('tournament_name')
+        .setLabel('Name')
+        .setStyle(TextInputStyle.Short)
+        .setValue(tournament.name)
+        .setRequired(true),
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('tournament_format')
+        .setLabel('Format')
+        .setStyle(TextInputStyle.Short)
+        .setValue(tournament.format)
+        .setRequired(true),
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('tournament_max')
+        .setLabel('Max Participants')
+        .setStyle(TextInputStyle.Short)
+        .setValue(String(tournament.max_participants))
+        .setRequired(true),
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('tournament_end_date')
+        .setLabel('End Date (optional)')
+        .setStyle(TextInputStyle.Short)
+        .setValue(tournament.end_date || '')
+        .setRequired(false),
+    ),
+  );
+
+  return interaction.showModal(modal);
+}
+
+async function handleEditSubmit(interaction, tournamentId) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const tid = parseInt(tournamentId, 10);
+  const tournament = db.getTournament.get(tid);
+  if (!tournament) return interaction.editReply('Tournament not found.');
+  if (tournament.status !== 'open') return interaction.editReply('Can only edit open tournaments.');
+
+  const name = interaction.fields.getTextInputValue('tournament_name').trim();
+  const format = interaction.fields.getTextInputValue('tournament_format').trim();
+  const maxStr = interaction.fields.getTextInputValue('tournament_max').trim();
+  const endDate = interaction.fields.getTextInputValue('tournament_end_date') || null;
+
+  const max = parseInt(maxStr, 10);
+  if (isNaN(max) || max < 2) {
+    return interaction.editReply('Max participants must be at least 2.');
+  }
+
+  db.updateTournament.run({ id: tid, name, format, max_participants: max, end_date: endDate });
+
+  await refreshTournamentsEmbed(interaction.client);
+  await logger.log('tournament', 'Tournament Edited', `**${name}** edited by <@${interaction.user.id}>`);
+  return interaction.editReply(`Tournament **${name}** updated!`);
+}
+
 // --- Modal submit ---
 
 async function handleCreateSubmit(interaction) {
@@ -238,6 +367,7 @@ async function handleCreateSubmit(interaction) {
   });
 
   await refreshTournamentsEmbed(interaction.client);
+  await logger.log('tournament', 'Tournament Created', `**${name}** (${type}, ${format}, max ${max})\nBy: <@${interaction.user.id}>`);
   return interaction.editReply(`Tournament **${name}** created!`);
 }
 
@@ -263,6 +393,7 @@ async function handleStart(interaction) {
   }
 
   await refreshTournamentsEmbed(interaction.client);
+  await logger.log('tournament', 'Tournament Started', `**${tournament.name}** (${count} participants)\nBy: <@${interaction.user.id}>`);
   return interaction.editReply({ content: `**${tournament.name}** started!`, components: [] });
 }
 
@@ -324,6 +455,7 @@ async function handleWinner(interaction, matchId, winnerId) {
     db.updateTournamentStatus.run('closed', match.tournament_id);
     db.updateParticipantStatus.run('winner', match.tournament_id, winnerId);
     await cleanupVoiceChannels(match.tournament_id, interaction.guild);
+    await logger.log('tournament', 'Tournament Complete', `**${tournament.name}** — Winner: <@${winnerId}>`);
   }
 
   await refreshTournamentsEmbed(interaction.client);
@@ -345,6 +477,7 @@ async function handleEnd(interaction) {
   await cleanupVoiceChannels(tournamentId, interaction.guild);
 
   await refreshTournamentsEmbed(interaction.client);
+  await logger.log('tournament', 'Tournament Closed', `**${tournament.name}** force-closed by <@${interaction.user.id}>`);
   return interaction.editReply({ content: `**${tournament.name}** closed.`, components: [] });
 }
 
@@ -411,6 +544,10 @@ async function cleanupVoiceChannels(tournamentId, guild) {
 module.exports = {
   postHostPanel,
   showCreateModal,
+  showEditSelect,
+  handleEditSelect,
+  showEditModal,
+  handleEditSubmit,
   showStartSelect,
   showResultSelect,
   showEndSelect,

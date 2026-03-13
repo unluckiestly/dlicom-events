@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 const db = require('../db');
 const config = require('../config');
+const logger = require('./logger');
 
 /**
  * Persistent embed in #tournaments.
@@ -54,10 +55,12 @@ async function refreshTournamentsEmbed(client) {
     new ButtonBuilder().setCustomId('t_status').setLabel('My Status').setStyle(ButtonStyle.Secondary),
   );
 
-  // Row 2: team management
+  // Row 2: team management + LFT
   const teamRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('team_create').setLabel('Create Team').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('team_my').setLabel('My Teams').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('t_lft').setLabel('Looking For Team').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('t_lft_list').setLabel('LFT List').setStyle(ButtonStyle.Secondary),
   );
 
   const payload = {
@@ -126,6 +129,7 @@ async function handleJoin(interaction) {
   if (tournament.type === 'solo') {
     db.insertParticipant.run(tournamentId, interaction.user.id, null);
     await refreshTournamentsEmbed(interaction.client);
+    await logger.log('player', 'Player Joined', `<@${interaction.user.id}> joined **${tournament.name}**`);
     return interaction.editReply({ content: `You joined **${tournament.name}**!`, components: [] });
   }
 
@@ -156,21 +160,22 @@ async function handleTeamSelect(interaction, tournamentId) {
   const tournament = db.getTournament.get(tid);
   if (!tournament) return interaction.editReply({ content: 'Tournament not found.', components: [] });
 
-  const existing = db.getParticipant.get(tid, interaction.user.id);
-  if (existing) return interaction.editReply({ content: 'Already registered.', components: [] });
+  // Check ALL team members — no one can be in the tournament already
+  const members = db.getTeamMembers.all(teamId);
+  const conflicts = members.filter(m => db.getParticipant.get(tid, m.user_id));
+  if (conflicts.length > 0) {
+    const names = conflicts.map(c => `<@${c.user_id}>`).join(', ');
+    return interaction.editReply({ content: `Can't register — already in this tournament: ${names}`, components: [] });
+  }
 
   // Register all team members
-  db.insertParticipant.run(tid, interaction.user.id, teamId);
-  const members = db.getTeamMembers.all(teamId);
   for (const m of members) {
-    if (m.user_id === interaction.user.id) continue;
-    if (!db.getParticipant.get(tid, m.user_id)) {
-      db.insertParticipant.run(tid, m.user_id, teamId);
-    }
+    db.insertParticipant.run(tid, m.user_id, teamId);
   }
 
   await refreshTournamentsEmbed(interaction.client);
   const team = db.getTeam.get(teamId);
+  await logger.log('player', 'Team Joined', `Team **${team.name}** registered for **${tournament.name}** by <@${interaction.user.id}>`);
   return interaction.editReply({ content: `Team **${team.name}** registered for **${tournament.name}**!`, components: [] });
 }
 
@@ -298,6 +303,108 @@ async function handleStatus(interaction) {
   return interaction.editReply({ content: `**${tournament.name}** — ${labels[participant.status] || participant.status}`, components: [] });
 }
 
+// --- LFT (Looking For Team) ---
+
+async function showLftSelect(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const tournaments = db.getOpenActiveTournaments.all().filter(t => t.status === 'open' && t.type === 'team');
+  if (tournaments.length === 0) {
+    return interaction.editReply('No open team tournaments right now.');
+  }
+
+  if (tournaments.length === 1) {
+    return handleLftAdd(interaction, tournaments[0]);
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('t_lft_select')
+      .setPlaceholder('Select tournament')
+      .addOptions(tournaments.map(t => ({
+        label: t.name,
+        value: String(t.id),
+      }))),
+  );
+
+  return interaction.editReply({ content: 'Looking for team in which tournament?', components: [row] });
+}
+
+async function handleLftSelect(interaction) {
+  await interaction.deferUpdate();
+
+  const tournamentId = parseInt(interaction.values[0], 10);
+  const tournament = db.getTournament.get(tournamentId);
+  if (!tournament) return interaction.editReply({ content: 'Tournament not found.', components: [] });
+
+  return handleLftAdd(interaction, tournament);
+}
+
+async function handleLftAdd(interaction, tournament) {
+  const existing = db.getLft.get(tournament.id, interaction.user.id);
+  if (existing) {
+    // Toggle off
+    db.removeLft.run(tournament.id, interaction.user.id);
+    await logger.log('player', 'LFT Removed', `<@${interaction.user.id}> no longer LFT for **${tournament.name}**`);
+    return interaction.editReply({ content: `You are no longer looking for a team in **${tournament.name}**.`, components: [] });
+  }
+
+  db.insertLft.run(tournament.id, interaction.user.id);
+  await logger.log('player', 'LFT Added', `<@${interaction.user.id}> is LFT for **${tournament.name}**`);
+  return interaction.editReply({ content: `You are now listed as **Looking For Team** in **${tournament.name}**. Captains can see you in the LFT List and invite you.`, components: [] });
+}
+
+async function showLftListSelect(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const tournaments = db.getOpenActiveTournaments.all().filter(t => t.type === 'team');
+  if (tournaments.length === 0) {
+    return interaction.editReply('No team tournaments right now.');
+  }
+
+  if (tournaments.length === 1) {
+    return showLftList(interaction, tournaments[0].id);
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('t_lft_list_select')
+      .setPlaceholder('Select tournament')
+      .addOptions(tournaments.map(t => ({
+        label: t.name,
+        value: String(t.id),
+      }))),
+  );
+
+  return interaction.editReply({ content: 'View LFT list for which tournament?', components: [row] });
+}
+
+async function handleLftListSelect(interaction) {
+  await interaction.deferUpdate();
+  const tournamentId = parseInt(interaction.values[0], 10);
+  return showLftList(interaction, tournamentId);
+}
+
+async function showLftList(interaction, tournamentId) {
+  const tournament = db.getTournament.get(tournamentId);
+  if (!tournament) return interaction.editReply({ content: 'Tournament not found.', components: [] });
+
+  const lftPlayers = db.getLftByTournament.all(tournamentId);
+  if (lftPlayers.length === 0) {
+    return interaction.editReply({ content: `**${tournament.name}** — no players looking for a team.`, embeds: [], components: [] });
+  }
+
+  const list = lftPlayers.map(p => `<@${p.user_id}>`).join('\n');
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${tournament.name} — Looking For Team`)
+    .setDescription(list)
+    .setFooter({ text: `${lftPlayers.length} player(s)` })
+    .setColor(0x57f287);
+
+  return interaction.editReply({ content: '', embeds: [embed], components: [] });
+}
+
 module.exports = {
   refreshTournamentsEmbed,
   showJoinSelect,
@@ -307,4 +414,8 @@ module.exports = {
   handleParticipantsSelect,
   showStatusSelect,
   handleStatus,
+  showLftSelect,
+  handleLftSelect,
+  showLftListSelect,
+  handleLftListSelect,
 };

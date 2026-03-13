@@ -60,6 +60,13 @@ db.exec(`
     completed INTEGER NOT NULL DEFAULT 0
   );
 
+  CREATE TABLE IF NOT EXISTS lft (
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (tournament_id, user_id)
+  );
+
   CREATE TABLE IF NOT EXISTS bot_state (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -86,6 +93,11 @@ const getOpenActiveTournaments = db.prepare(`
 
 const updateTournamentStatus = db.prepare(`
   UPDATE tournaments SET status = ? WHERE id = ?
+`);
+
+const updateTournament = db.prepare(`
+  UPDATE tournaments SET name = @name, format = @format, max_participants = @max_participants, end_date = @end_date
+  WHERE id = @id
 `);
 
 // --- Participant queries ---
@@ -189,6 +201,24 @@ const getRemainingMatches = db.prepare(`
   SELECT COUNT(*) AS count FROM bracket_matches WHERE tournament_id = ? AND completed = 0
 `);
 
+// --- LFT queries ---
+
+const insertLft = db.prepare(`
+  INSERT OR IGNORE INTO lft (tournament_id, user_id) VALUES (?, ?)
+`);
+
+const removeLft = db.prepare(`
+  DELETE FROM lft WHERE tournament_id = ? AND user_id = ?
+`);
+
+const getLftByTournament = db.prepare(`
+  SELECT * FROM lft WHERE tournament_id = ?
+`);
+
+const getLft = db.prepare(`
+  SELECT * FROM lft WHERE tournament_id = ? AND user_id = ?
+`);
+
 // --- Bot state queries ---
 
 const getState = db.prepare(`SELECT value FROM bot_state WHERE key = ?`);
@@ -204,6 +234,7 @@ module.exports = {
   getTournament,
   getOpenActiveTournaments,
   updateTournamentStatus,
+  updateTournament,
   insertParticipant,
   getParticipant,
   getParticipantsByTournament,
@@ -228,6 +259,10 @@ module.exports = {
   getMatchById,
   getMatchesByRound,
   getRemainingMatches,
+  insertLft,
+  removeLft,
+  getLftByTournament,
+  getLft,
   getState,
   setState,
 };

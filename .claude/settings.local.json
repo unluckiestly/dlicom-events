@@ -6,7 +6,10 @@
       "Bash(cd D:/dlicom-events && node -e \"\n  require\\('./src/db'\\);\n  require\\('./src/config'\\);\n  require\\('./src/handlers/tournaments'\\);\n  require\\('./src/handlers/teams'\\);\n  require\\('./src/handlers/bracket'\\);\n  require\\('./src/commands/host'\\);\n  require\\('./src/commands/team'\\);\n  require\\('./src/commands/player'\\);\n  console.log\\('All modules loaded successfully'\\);\n\")",
       "Bash(cd D:/dlicom-events && node -e \"require\\('./src/deploy.js'\\)\" 2>&1 | head -5)",
       "Bash(ls D:/dlicom-events/tournaments.db* 2>/dev/null)",
-      "Bash(cd D:/dlicom-events && node -e \"require\\('./src/handlers/hostPanel'\\); console.log\\('OK'\\)\")"
+      "Bash(cd D:/dlicom-events && node -e \"require\\('./src/handlers/hostPanel'\\); console.log\\('OK'\\)\")",
+      "Bash(cd D:/dlicom-events && node -e \"\n  require\\('./src/handlers/logger'\\);\n  require\\('./src/handlers/hostPanel'\\);\n  require\\('./src/handlers/tournaments'\\);\n  require\\('./src/handlers/teamPanel'\\);\n  require\\('./src/events/messageReactionAdd'\\);\n  require\\('./src/events/ready'\\);\n  console.log\\('OK'\\);\n\")",
+      "Bash(cd D:/dlicom-events && node -e \"require\\('./src/handlers/hostPanel'\\); require\\('./src/events/interactionCreate'\\); console.log\\('OK'\\)\")",
+      "Bash(cd D:/dlicom-events && node -e \"require\\('./src/handlers/tournaments'\\); require\\('./src/events/interactionCreate'\\); console.log\\('OK'\\)\")"
     ]
   }
 }

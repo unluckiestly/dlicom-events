@@ -2,6 +2,26 @@ const { Events } = require('discord.js');
 const hostPanel = require('../handlers/hostPanel');
 const tournaments = require('../handlers/tournaments');
 const teamPanel = require('../handlers/teamPanel');
+const config = require('../config');
+
+const VERIFY_DENIED = 'You need to verify first — react ✅ in the how-it-works channel.';
+
+function isVerified(interaction) {
+  const member = interaction.member;
+  if (!member) return false;
+  if (member.roles?.cache) {
+    return member.roles.cache.some(r => r.name === config.VERIFIED_ROLE_NAME);
+  }
+  if (Array.isArray(member.roles)) {
+    const guild = interaction.guild;
+    if (!guild) return false;
+    return member.roles.some(roleId => {
+      const role = guild.roles.cache.get(roleId);
+      return role && role.name === config.VERIFIED_ROLE_NAME;
+    });
+  }
+  return false;
+}
 
 module.exports = {
   name: Events.InteractionCreate,
@@ -43,19 +63,33 @@ async function routeButton(interaction) {
 
   // Host panel
   if (id === 'host_create') return hostPanel.showCreateModal(interaction);
+  if (id === 'host_edit') return hostPanel.showEditSelect(interaction);
   if (id === 'host_start') return hostPanel.showStartSelect(interaction);
   if (id === 'host_result') return hostPanel.showResultSelect(interaction);
   if (id === 'host_end') return hostPanel.showEndSelect(interaction);
 
+  if (id.startsWith('host_edit_open:')) {
+    return hostPanel.showEditModal(interaction, id.split(':')[1]);
+  }
   if (id.startsWith('host_winner:')) {
     const parts = id.split(':');
     return hostPanel.handleWinner(interaction, parts[1], parts[2]);
   }
 
-  // Tournament player actions
+  // Tournament player actions (require Verified)
+  if (id === 't_join' || id === 't_participants' || id === 't_status' ||
+      id === 't_lft' || id === 't_lft_list' ||
+      id === 'team_create' || id === 'team_my') {
+    if (!isVerified(interaction)) {
+      return interaction.reply({ content: VERIFY_DENIED, ephemeral: true });
+    }
+  }
+
   if (id === 't_join') return tournaments.showJoinSelect(interaction);
   if (id === 't_participants') return tournaments.showParticipantsSelect(interaction);
   if (id === 't_status') return tournaments.showStatusSelect(interaction);
+  if (id === 't_lft') return tournaments.showLftSelect(interaction);
+  if (id === 't_lft_list') return tournaments.showLftListSelect(interaction);
 
   // Team panel
   if (id === 'team_create') return teamPanel.showCreateModal(interaction);
@@ -85,6 +119,7 @@ async function routeStringSelect(interaction) {
   const id = interaction.customId;
 
   // Host selects
+  if (id === 'host_edit_select') return hostPanel.handleEditSelect(interaction);
   if (id === 'host_start_select') return hostPanel.handleStart(interaction);
   if (id === 'host_result_select') return hostPanel.handleResultSelect(interaction);
   if (id === 'host_end_select') return hostPanel.handleEnd(interaction);
@@ -93,6 +128,8 @@ async function routeStringSelect(interaction) {
   if (id === 't_join_select') return tournaments.handleJoin(interaction);
   if (id === 't_participants_select') return tournaments.handleParticipantsSelect(interaction);
   if (id === 't_status_select') return tournaments.handleStatus(interaction);
+  if (id === 't_lft_select') return tournaments.handleLftSelect(interaction);
+  if (id === 't_lft_list_select') return tournaments.handleLftListSelect(interaction);
 
   if (id.startsWith('t_team_select:')) {
     return tournaments.handleTeamSelect(interaction, id.split(':')[1]);
@@ -119,4 +156,8 @@ async function routeModal(interaction) {
 
   if (id === 'modal_create_tournament') return hostPanel.handleCreateSubmit(interaction);
   if (id === 'modal_create_team') return teamPanel.handleCreateSubmit(interaction);
+
+  if (id.startsWith('modal_edit_tournament:')) {
+    return hostPanel.handleEditSubmit(interaction, id.split(':')[1]);
+  }
 }
