@@ -34,7 +34,8 @@ async function postHostPanel(client) {
       '**Start** — lock registrations and begin tournament\n' +
       '**End** — force-close a tournament\n\n' +
       '**Teams** — view all teams\n' +
-      '**Edit Team** — add/remove members from a team',
+      '**Edit Team** — add/remove members from a team\n' +
+      '**Manage Players** — remove players/teams from a tournament',
     )
     .setColor(0xed4245);
 
@@ -48,6 +49,7 @@ async function postHostPanel(client) {
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('host_teams').setLabel('Teams').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('host_edit_team').setLabel('Edit Team').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('host_manage_players').setLabel('Manage Players').setStyle(ButtonStyle.Danger),
   );
 
   const payload = { embeds: [embed], components: [row1, row2] };
@@ -605,10 +607,121 @@ async function handleTeamDisband(interaction, teamId) {
   const team = db.getTeam.get(tid);
   if (!team) return interaction.editReply({ content: 'Team not found.', embeds: [], components: [] });
 
+  db.removeParticipantsByTeam.run(tid);
   db.db.prepare('DELETE FROM team_members WHERE team_id = ?').run(tid);
   db.deleteTeam.run(tid);
 
+  await refreshTournamentsEmbed(interaction.client);
   return interaction.editReply({ content: `Team **${team.name}** disbanded.`, embeds: [], components: [] });
+}
+
+// --- Manage players in tournament (host) ---
+
+async function showManagePlayersSelect(interaction) {
+  if (!isHost(interaction)) {
+    return interaction.reply({ content: 'You need the **Host** role.', ephemeral: true });
+  }
+  await interaction.deferReply({ ephemeral: true });
+
+  const tournaments = db.getOpenActiveTournaments.all();
+  if (tournaments.length === 0) {
+    return interaction.editReply('No open or active tournaments.');
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('host_manage_tournament_select')
+      .setPlaceholder('Select tournament')
+      .addOptions(tournaments.map(t => ({
+        label: `${t.name} (${t.participant_count} participants)`,
+        value: String(t.id),
+      }))),
+  );
+
+  return interaction.editReply({ content: 'Manage players in which tournament?', components: [row] });
+}
+
+async function handleManageTournamentSelect(interaction) {
+  await interaction.deferUpdate();
+
+  const tournamentId = parseInt(interaction.values[0], 10);
+  const tournament = db.getTournament.get(tournamentId);
+  if (!tournament) return interaction.editReply({ content: 'Tournament not found.', components: [] });
+
+  const participants = db.getParticipantsByTournament.all(tournamentId);
+  if (participants.length === 0) {
+    return interaction.editReply({ content: `**${tournament.name}** — no participants.`, components: [] });
+  }
+
+  if (tournament.type === 'team') {
+    // Show teams to remove
+    const teamIds = [...new Set(participants.map(p => p.team_id).filter(Boolean))];
+    const options = [];
+
+    for (const teamId of teamIds) {
+      const team = db.getTeam.get(teamId);
+      const name = team ? team.name : `Team #${teamId}`;
+      options.push({ label: name, value: `team:${teamId}` });
+    }
+
+    // Also show solo participants (no team)
+    const soloParticipants = participants.filter(p => !p.team_id);
+    for (const p of soloParticipants) {
+      options.push({ label: p.user_id, description: 'Solo', value: `user:${p.user_id}` });
+    }
+
+    if (options.length === 0) {
+      return interaction.editReply({ content: 'No participants to remove.', components: [] });
+    }
+
+    const row = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`host_remove_participant:${tournamentId}`)
+        .setPlaceholder('Select team or player to remove')
+        .addOptions(options.slice(0, 25)),
+    );
+
+    return interaction.editReply({ content: `Remove from **${tournament.name}**:`, components: [row] });
+  }
+
+  // Solo tournament — show players
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`host_remove_participant:${tournamentId}`)
+      .setPlaceholder('Select player to remove')
+      .addOptions(participants.slice(0, 25).map(p => ({
+        label: p.user_id,
+        value: `user:${p.user_id}`,
+      }))),
+  );
+
+  return interaction.editReply({ content: `Remove from **${tournament.name}**:`, components: [row] });
+}
+
+async function handleRemoveParticipant(interaction, tournamentId) {
+  await interaction.deferUpdate();
+
+  const tid = parseInt(tournamentId, 10);
+  const tournament = db.getTournament.get(tid);
+  if (!tournament) return interaction.editReply({ content: 'Tournament not found.', components: [] });
+
+  const value = interaction.values[0];
+
+  if (value.startsWith('team:')) {
+    const teamId = parseInt(value.split(':')[1], 10);
+    const team = db.getTeam.get(teamId);
+    const teamName = team ? team.name : `Team #${teamId}`;
+    db.removeParticipantsByTeamAndTournament.run(tid, teamId);
+    await refreshTournamentsEmbed(interaction.client);
+    return interaction.editReply({ content: `Team **${teamName}** removed from **${tournament.name}**.`, components: [] });
+  }
+
+  if (value.startsWith('user:')) {
+    const userId = value.split(':')[1];
+    db.removeParticipant.run(tid, userId);
+    await refreshTournamentsEmbed(interaction.client);
+    return interaction.editReply({ content: `<@${userId}> removed from **${tournament.name}**.`, components: [] });
+  }
 }
 
 // --- Voice channel helpers ---
@@ -669,6 +782,9 @@ module.exports = {
   handleCreateSubmit,
   handleStart,
   handleEnd,
+  showManagePlayersSelect,
+  handleManageTournamentSelect,
+  handleRemoveParticipant,
   showAllTeams,
   showEditTeamSelect,
   handleTeamSelect,

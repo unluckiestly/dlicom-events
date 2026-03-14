@@ -111,6 +111,18 @@ const updateParticipantStatus = db.prepare(`
   UPDATE participants SET status = ? WHERE tournament_id = ? AND user_id = ?
 `);
 
+const removeParticipant = db.prepare(`
+  DELETE FROM participants WHERE tournament_id = ? AND user_id = ?
+`);
+
+const removeParticipantsByTeamAndTournament = db.prepare(`
+  DELETE FROM participants WHERE tournament_id = ? AND team_id = ?
+`);
+
+const removeParticipantsByTeam = db.prepare(`
+  DELETE FROM participants WHERE team_id = ?
+`);
+
 // --- Team queries ---
 
 const insertTeam = db.prepare(`
@@ -206,6 +218,9 @@ module.exports = {
   getParticipantsByTournament,
   getParticipantCount,
   updateParticipantStatus,
+  removeParticipant,
+  removeParticipantsByTeamAndTournament,
+  removeParticipantsByTeam,
   insertTeam,
   getTeam,
   getTeamByName,

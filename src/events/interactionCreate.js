@@ -49,6 +49,7 @@ async function routeButton(interaction) {
 
   if (id === 'host_teams') return hostPanel.showAllTeams(interaction);
   if (id === 'host_edit_team') return hostPanel.showEditTeamSelect(interaction);
+  if (id === 'host_manage_players') return hostPanel.showManagePlayersSelect(interaction);
 
   if (id.startsWith('host_edit_open:')) {
     return hostPanel.showEditModal(interaction, id.split(':')[1]);
@@ -100,6 +101,10 @@ async function routeStringSelect(interaction) {
   if (id === 'host_edit_select') return hostPanel.handleEditSelect(interaction);
   if (id === 'host_start_select') return hostPanel.handleStart(interaction);
   if (id === 'host_end_select') return hostPanel.handleEnd(interaction);
+  if (id === 'host_manage_tournament_select') return hostPanel.handleManageTournamentSelect(interaction);
+  if (id.startsWith('host_remove_participant:')) {
+    return hostPanel.handleRemoveParticipant(interaction, id.split(':')[1]);
+  }
 
   // Player tournament selects
   if (id === 't_join_select') return tournaments.handleJoin(interaction);

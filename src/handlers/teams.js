@@ -20,6 +20,7 @@ function removeMember(teamId, userId) {
   if (team.captain_id === userId) {
     const remaining = db.getTeamMembers.all(teamId);
     if (remaining.length === 0) {
+      db.removeParticipantsByTeam.run(teamId);
       db.deleteTeam.run(teamId);
       return 'disbanded';
     }
@@ -35,6 +36,7 @@ function disbandTeam(teamId, requesterId) {
   const team = db.getTeam.get(teamId);
   if (!team) return 'not_found';
   if (team.captain_id !== requesterId) return 'not_captain';
+  db.removeParticipantsByTeam.run(teamId);
   db.deleteTeam.run(teamId);
   return 'disbanded';
 }
