@@ -6,7 +6,7 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-
+  UserSelectMenuBuilder,
   StringSelectMenuBuilder,
 } = require('discord.js');
 const db = require('../db');
@@ -142,67 +142,50 @@ async function showTeamActions(interaction) {
   return interaction.editReply({ content: '', embeds: [embed], components: [row] });
 }
 
-// --- Button: Invite → Modal with username input ---
+// --- Button: Invite → User select menu ---
 
-function showInviteModal(interaction, teamId) {
+async function showInviteUserSelect(interaction, teamId) {
+  await interaction.deferUpdate();
+
   const team = db.getTeam.get(parseInt(teamId, 10));
-  if (!team) return interaction.reply({ content: 'Team not found.', ephemeral: true });
+  if (!team) return interaction.editReply({ content: 'Team not found.', components: [] });
   if (team.captain_id !== interaction.user.id) {
-    return interaction.reply({ content: 'Only the captain can invite.', ephemeral: true });
+    return interaction.editReply({ content: 'Only the captain can invite.', components: [] });
   }
 
   const members = db.getTeamMembers.all(team.id);
   if (members.length >= team.size) {
-    return interaction.reply({ content: 'Team is full.', ephemeral: true });
+    return interaction.editReply({ content: 'Team is full.', components: [] });
   }
 
-  const modal = new ModalBuilder()
-    .setCustomId(`modal_invite:${team.id}`)
-    .setTitle(`Invite to ${team.name}`);
-
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('invite_user_id')
-        .setLabel('User ID (right-click user → Copy User ID)')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('e.g. 244862047903285248')
-        .setRequired(true),
-    ),
+  const row = new ActionRowBuilder().addComponents(
+    new UserSelectMenuBuilder()
+      .setCustomId(`team_invite_user:${team.id}`)
+      .setPlaceholder('Select a user to invite')
+      .setMinValues(1)
+      .setMaxValues(1),
   );
 
-  return interaction.showModal(modal);
+  return interaction.editReply({ content: `Invite someone to **${team.name}**:`, embeds: [], components: [row] });
 }
 
-// --- Modal submit: find user by ID and send DM invite ---
+// --- User select: send DM invite ---
 
-async function handleInviteSubmit(interaction, teamId) {
-  await interaction.deferReply({ ephemeral: true });
+async function handleInviteUser(interaction, teamId) {
+  await interaction.deferUpdate();
 
   const tid = parseInt(teamId, 10);
   const team = db.getTeam.get(tid);
-  if (!team) return interaction.editReply('Team not found.');
+  if (!team) return interaction.editReply({ content: 'Team not found.', components: [] });
 
-  const input = interaction.fields.getTextInputValue('invite_user_id').trim().replace(/[<@!>]/g, '');
-
-  if (!/^\d+$/.test(input)) {
-    return interaction.editReply('Invalid User ID. Right-click a user → **Copy User ID**.');
+  const targetId = interaction.values[0];
+  if (targetId === interaction.user.id) {
+    return interaction.editReply({ content: "You can't invite yourself.", components: [] });
   }
 
-  let target;
-  try {
-    target = await interaction.client.users.fetch(input);
-  } catch {
-    return interaction.editReply('User not found.');
-  }
-
-  if (target.id === interaction.user.id) {
-    return interaction.editReply("You can't invite yourself.");
-  }
-
-  const existing = db.getTeamMember.get(tid, target.id);
+  const existing = db.getTeamMember.get(tid, targetId);
   if (existing) {
-    return interaction.editReply('That user is already on the team.');
+    return interaction.editReply({ content: 'That user is already on the team.', components: [] });
   }
 
   const row = new ActionRowBuilder().addComponents(
@@ -217,13 +200,14 @@ async function handleInviteSubmit(interaction, teamId) {
   );
 
   try {
+    const target = await interaction.client.users.fetch(targetId);
     await target.send({
       content: `**${interaction.user.username}** invited you to join team **${team.name}** (${team.size} players).`,
       components: [row],
     });
-    return interaction.editReply(`Invite sent to **${target.username}**.`);
+    return interaction.editReply({ content: `Invite sent to <@${targetId}>.`, embeds: [], components: [] });
   } catch {
-    return interaction.editReply('Could not DM that user — they may have DMs disabled.');
+    return interaction.editReply({ content: 'Could not DM that user — they may have DMs disabled.', embeds: [], components: [] });
   }
 }
 
@@ -371,8 +355,8 @@ module.exports = {
   handleCreateSubmit,
   showMyTeams,
   showTeamActions,
-  showInviteModal,
-  handleInviteSubmit,
+  showInviteUserSelect,
+  handleInviteUser,
   showKickSelect,
   handleKick,
   handleAccept,
