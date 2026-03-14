@@ -161,6 +161,10 @@ const updateTeamMemberRole = db.prepare(`
   UPDATE team_members SET role = ? WHERE team_id = ? AND user_id = ?
 `);
 
+const getTournamentsByTeam = db.prepare(`
+  SELECT DISTINCT tournament_id FROM participants WHERE team_id = ?
+`);
+
 // --- LFT queries ---
 
 const insertLft = db.prepare(`
@@ -216,6 +220,7 @@ module.exports = {
   removeLft,
   getLftByTournament,
   getLft,
+  getTournamentsByTeam,
   getState,
   setState,
 };

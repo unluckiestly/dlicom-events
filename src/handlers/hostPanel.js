@@ -13,7 +13,7 @@ const {
 const db = require('../db');
 const config = require('../config');
 const { refreshTournamentsEmbed } = require('./tournaments');
-const logger = require('./logger');
+
 
 // --- Persistent host panel ---
 
@@ -309,7 +309,6 @@ async function handleEditSubmit(interaction, tournamentId) {
   db.updateTournament.run({ id: tid, name, format, max_participants: max, end_date: endDate });
 
   await refreshTournamentsEmbed(interaction.client);
-  await logger.log('tournament', 'Tournament Edited', `**${name}** edited by <@${interaction.user.id}>`);
   return interaction.editReply(`Tournament **${name}** updated!`);
 }
 
@@ -342,7 +341,6 @@ async function handleCreateSubmit(interaction) {
   });
 
   await refreshTournamentsEmbed(interaction.client);
-  await logger.log('tournament', 'Tournament Created', `**${name}** (${type}, ${format}, max ${max})\nBy: <@${interaction.user.id}>`);
   return interaction.editReply(`Tournament **${name}** created!`);
 }
 
@@ -357,7 +355,17 @@ async function handleStart(interaction) {
   if (tournament.status !== 'open') return interaction.editReply({ content: 'Tournament is not open.', components: [] });
 
   const count = db.getParticipantCount.get(tournamentId).count;
-  if (count < 2) return interaction.editReply({ content: 'Need at least 2 participants.', components: [] });
+  if (count < 1) return interaction.editReply({ content: 'Need at least 1 participant.', components: [] });
+
+  // Create private voice channels for teams (before changing status)
+  if (tournament.type === 'team') {
+    try {
+      await createTeamVoiceChannels(interaction.guild, tournament);
+    } catch (err) {
+      console.error('Failed to create voice channels:', err.message);
+      return interaction.editReply({ content: `Failed to start — could not create voice channels: ${err.message}`, components: [] });
+    }
+  }
 
   db.updateTournamentStatus.run('active', tournamentId);
 
@@ -367,13 +375,7 @@ async function handleStart(interaction) {
     db.updateParticipantStatus.run('active', tournamentId, p.user_id);
   }
 
-  // Create private voice channels for teams
-  if (tournament.type === 'team') {
-    await createTeamVoiceChannels(interaction.guild, tournament);
-  }
-
   await refreshTournamentsEmbed(interaction.client);
-  await logger.log('tournament', 'Tournament Started', `**${tournament.name}** (${count} participants)\nBy: <@${interaction.user.id}>`);
   return interaction.editReply({ content: `**${tournament.name}** started!`, components: [] });
 }
 
@@ -388,14 +390,12 @@ async function handleEnd(interaction) {
   await cleanupVoiceChannels(tournamentId, interaction.guild);
 
   await refreshTournamentsEmbed(interaction.client);
-  await logger.log('tournament', 'Tournament Closed', `**${tournament.name}** force-closed by <@${interaction.user.id}>`);
   return interaction.editReply({ content: `**${tournament.name}** closed.`, components: [] });
 }
 
 // --- Voice channel helpers ---
 
 async function createTeamVoiceChannels(guild, tournament) {
-  // Create category
   const category = await guild.channels.create({
     name: tournament.name,
     type: ChannelType.GuildCategory,
@@ -403,7 +403,6 @@ async function createTeamVoiceChannels(guild, tournament) {
 
   db.setState.run(`category:${tournament.id}`, category.id);
 
-  // Get unique teams from participants
   const participants = db.getParticipantsByTournament.all(tournament.id);
   const teamIds = [...new Set(participants.map(p => p.team_id).filter(Boolean))];
 
@@ -413,23 +412,11 @@ async function createTeamVoiceChannels(guild, tournament) {
 
     const members = db.getTeamMembers.all(teamId);
 
-    // Permission overwrites: deny everyone, allow team members
-    const permissionOverwrites = [
-      {
-        id: guild.id, // @everyone
-        deny: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel],
-      },
-      ...members.map(m => ({
-        id: m.user_id,
-        allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel],
-      })),
-    ];
-
     await guild.channels.create({
       name: team.name,
       type: ChannelType.GuildVoice,
       parent: category.id,
-      permissionOverwrites,
+      userLimit: members.length,
     });
   }
 }

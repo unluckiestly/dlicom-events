@@ -2,26 +2,6 @@ const { Events } = require('discord.js');
 const hostPanel = require('../handlers/hostPanel');
 const tournaments = require('../handlers/tournaments');
 const teamPanel = require('../handlers/teamPanel');
-const config = require('../config');
-
-const VERIFY_DENIED = 'You need to verify first — react ✅ in the how-it-works channel.';
-
-function isVerified(interaction) {
-  const member = interaction.member;
-  if (!member) return false;
-  if (member.roles?.cache) {
-    return member.roles.cache.some(r => r.name === config.VERIFIED_ROLE_NAME);
-  }
-  if (Array.isArray(member.roles)) {
-    const guild = interaction.guild;
-    if (!guild) return false;
-    return member.roles.some(roleId => {
-      const role = guild.roles.cache.get(roleId);
-      return role && role.name === config.VERIFIED_ROLE_NAME;
-    });
-  }
-  return false;
-}
 
 module.exports = {
   name: Events.InteractionCreate,
@@ -69,15 +49,6 @@ async function routeButton(interaction) {
 
   if (id.startsWith('host_edit_open:')) {
     return hostPanel.showEditModal(interaction, id.split(':')[1]);
-  }
-
-  // Tournament player actions (require Verified)
-  if (id === 't_join' || id === 't_participants' || id === 't_status' ||
-      id === 't_lft' || id === 't_lft_list' ||
-      id === 'team_create' || id === 'team_my') {
-    if (!isVerified(interaction)) {
-      return interaction.reply({ content: VERIFY_DENIED, ephemeral: true });
-    }
   }
 
   if (id === 't_join') return tournaments.showJoinSelect(interaction);

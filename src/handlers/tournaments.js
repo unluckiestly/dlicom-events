@@ -7,7 +7,7 @@ const {
 } = require('discord.js');
 const db = require('../db');
 const config = require('../config');
-const logger = require('./logger');
+
 
 /**
  * Persistent embed in #tournaments.
@@ -129,7 +129,6 @@ async function handleJoin(interaction) {
   if (tournament.type === 'solo') {
     db.insertParticipant.run(tournamentId, interaction.user.id, null);
     await refreshTournamentsEmbed(interaction.client);
-    await logger.log('player', 'Player Joined', `<@${interaction.user.id}> joined **${tournament.name}**`);
     return interaction.editReply({ content: `You joined **${tournament.name}**!`, components: [] });
   }
 
@@ -175,7 +174,6 @@ async function handleTeamSelect(interaction, tournamentId) {
 
   await refreshTournamentsEmbed(interaction.client);
   const team = db.getTeam.get(teamId);
-  await logger.log('player', 'Team Joined', `Team **${team.name}** registered for **${tournament.name}** by <@${interaction.user.id}>`);
   return interaction.editReply({ content: `Team **${team.name}** registered for **${tournament.name}**!`, components: [] });
 }
 
@@ -345,12 +343,10 @@ async function handleLftAdd(interaction, tournament) {
   if (existing) {
     // Toggle off
     db.removeLft.run(tournament.id, interaction.user.id);
-    await logger.log('player', 'LFT Removed', `<@${interaction.user.id}> no longer LFT for **${tournament.name}**`);
     return interaction.editReply({ content: `You are no longer looking for a team in **${tournament.name}**.`, components: [] });
   }
 
   db.insertLft.run(tournament.id, interaction.user.id);
-  await logger.log('player', 'LFT Added', `<@${interaction.user.id}> is LFT for **${tournament.name}**`);
   return interaction.editReply({ content: `You are now listed as **Looking For Team** in **${tournament.name}**. Captains can see you in the LFT List and invite you.`, components: [] });
 }
 

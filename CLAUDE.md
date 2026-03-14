@@ -17,9 +17,8 @@ Discord bot for tournament/event management using Discord.js v14 and better-sqli
 ### Event flow
 
 1. **`src/index.js`** — creates Client, loads all files from `src/events/` as event listeners
-2. **`src/events/ready.js`** — on startup, posts/updates persistent embeds (host panel in #staff, tournament list in #tournaments, verification guide in #how-it-works)
-3. **`src/events/interactionCreate.js`** — central router that dispatches by `customId` prefix to handler functions. Checks `Verified` role before allowing player/team actions.
-4. **`src/events/messageReactionAdd.js` / `messageReactionRemove.js`** — verification via ✅ reaction → grants/removes Verified role
+2. **`src/events/ready.js`** — on startup, posts/updates persistent embeds (host panel in #staff, tournament list in #tournaments)
+3. **`src/events/interactionCreate.js`** — central router that dispatches by `customId` prefix to handler functions.
 
 ### Handlers (src/handlers/)
 
@@ -29,12 +28,11 @@ Discord bot for tournament/event management using Discord.js v14 and better-sqli
 | `tournaments.js` | Player-facing: join, participants list, status, LFT system |
 | `teamPanel.js` | Team UI: create, invite (DM-based), kick, leave, disband |
 | `teams.js` | Team DB operations (create, add/remove member, transfer captain) |
-| `verification.js` | Verification guide embed + reaction role logic |
 | `logger.js` | Color-coded log embeds to #logs channel |
 
 ### Persistent UI pattern
 
-All main embeds (host panel, tournament list, verification guide) use an edit-or-create pattern: message IDs are stored in the `bot_state` table, and on startup the bot tries to edit the existing message before creating a new one.
+All main embeds (host panel, tournament list) use an edit-or-create pattern: message IDs are stored in the `bot_state` table, and on startup the bot tries to edit the existing message before creating a new one.
 
 ### CustomId routing convention
 
@@ -58,8 +56,8 @@ Tournament statuses: `open` → `active` → `closed`. Participant statuses: `re
 ## Key conventions
 
 - All interactions are deferred before processing (`deferReply({ ephemeral: true })` or `deferUpdate()`)
-- Role checks (`isHost()`, `isVerified()`) handle both cached `GuildMemberRoleManager` and raw role ID arrays
+- Role check `isHost()` handles both cached `GuildMemberRoleManager` and raw role ID arrays
 - Voice channels are created per team when a team tournament starts, deleted when it ends
 - Team invitations use DMs with Accept/Decline buttons
-- Log embed colors: tournament=0x5865f2, team=0x3498db, player=0x57f287, moderation=0xed4245, verify=0xfee75c
+- Log embed colors: tournament=0x5865f2, team=0x3498db, player=0x57f287, moderation=0xed4245
 - No bracket/seeding system — hosts manage matches manually

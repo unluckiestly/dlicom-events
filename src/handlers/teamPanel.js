@@ -11,7 +11,8 @@ const {
 } = require('discord.js');
 const db = require('../db');
 const teamsHandler = require('./teams');
-const logger = require('./logger');
+const { refreshTournamentsEmbed } = require('./tournaments');
+
 
 // --- Button: Create Team → Modal ---
 
@@ -55,7 +56,6 @@ async function handleCreateSubmit(interaction) {
   if (existing) return interaction.editReply('A team with that name already exists.');
 
   teamsHandler.createTeam(name, size, interaction.user.id);
-  await logger.log('team', 'Team Created', `**${name}** (${size} players) by <@${interaction.user.id}>`);
   return interaction.editReply(`Team **${name}** (${size} players) created! You are the captain.`);
 }
 
@@ -227,7 +227,18 @@ async function handleAccept(interaction, teamId) {
   if (members.length >= team.size) return interaction.editReply({ content: 'Team is full.', components: [] });
 
   teamsHandler.addMember(tid, interaction.user.id);
-  await logger.log('team', 'Member Joined', `<@${interaction.user.id}> joined team **${team.name}**`);
+
+  // Add to all tournaments the team is registered in
+  const teamTournaments = db.getTournamentsByTeam.all(tid);
+  for (const { tournament_id } of teamTournaments) {
+    const already = db.getParticipant.get(tournament_id, interaction.user.id);
+    if (!already) {
+      db.insertParticipant.run(tournament_id, interaction.user.id, tid);
+    }
+  }
+  if (teamTournaments.length > 0) {
+    await refreshTournamentsEmbed(interaction.client);
+  }
 
   try {
     const captain = await interaction.client.users.fetch(team.captain_id);
@@ -296,7 +307,6 @@ async function handleKick(interaction, teamId) {
 
   const targetId = interaction.values[0];
   teamsHandler.removeMember(tid, targetId);
-  await logger.log('moderation', 'Member Kicked', `<@${targetId}> kicked from **${team.name}** by <@${interaction.user.id}>`);
 
   try {
     const target = await interaction.client.users.fetch(targetId);
@@ -322,7 +332,6 @@ async function handleLeave(interaction, teamId) {
     removed: `You left **${team.name}**.`,
   };
 
-  await logger.log('team', 'Member Left', `<@${interaction.user.id}> left **${team.name}**${result === 'disbanded' ? ' (disbanded)' : ''}`);
   return interaction.editReply({ content: msgs[result] || 'Done.', embeds: [], components: [] });
 }
 
@@ -338,7 +347,6 @@ async function handleDisband(interaction, teamId) {
     return interaction.editReply({ content: 'Only the captain can disband.', embeds: [], components: [] });
   }
 
-  await logger.log('moderation', 'Team Disbanded', `**${team.name}** disbanded by <@${interaction.user.id}>`);
   return interaction.editReply({ content: `Team **${team.name}** disbanded.`, embeds: [], components: [] });
 }
 
