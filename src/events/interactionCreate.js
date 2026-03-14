@@ -47,8 +47,20 @@ async function routeButton(interaction) {
   if (id === 'host_start') return hostPanel.showStartSelect(interaction);
   if (id === 'host_end') return hostPanel.showEndSelect(interaction);
 
+  if (id === 'host_teams') return hostPanel.showAllTeams(interaction);
+  if (id === 'host_edit_team') return hostPanel.showEditTeamSelect(interaction);
+
   if (id.startsWith('host_edit_open:')) {
     return hostPanel.showEditModal(interaction, id.split(':')[1]);
+  }
+  if (id.startsWith('host_team_add:')) {
+    return hostPanel.showTeamAddUser(interaction, id.split(':')[1]);
+  }
+  if (id.startsWith('host_team_kick:')) {
+    return hostPanel.showTeamKickSelect(interaction, id.split(':')[1]);
+  }
+  if (id.startsWith('host_team_disband:')) {
+    return hostPanel.handleTeamDisband(interaction, id.split(':')[1]);
   }
 
   if (id === 't_join') return tournaments.showJoinSelect(interaction);
@@ -100,6 +112,12 @@ async function routeStringSelect(interaction) {
     return tournaments.handleTeamSelect(interaction, id.split(':')[1]);
   }
 
+  // Host team selects
+  if (id === 'host_team_select') return hostPanel.handleTeamSelect(interaction);
+  if (id.startsWith('host_team_kick_select:')) {
+    return hostPanel.handleTeamKick(interaction, id.split(':')[1]);
+  }
+
   // Team selects
   if (id === 'team_action_select') return teamPanel.showTeamActions(interaction);
 
@@ -113,6 +131,9 @@ async function routeUserSelect(interaction) {
 
   if (id.startsWith('team_invite_user:')) {
     return teamPanel.handleInviteUser(interaction, id.split(':')[1]);
+  }
+  if (id.startsWith('host_team_add_user:')) {
+    return hostPanel.handleTeamAddUser(interaction, id.split(':')[1]);
   }
 }
 

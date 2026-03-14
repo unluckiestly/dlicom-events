@@ -7,6 +7,7 @@ const {
   TextInputBuilder,
   TextInputStyle,
   StringSelectMenuBuilder,
+  UserSelectMenuBuilder,
   ChannelType,
   PermissionFlagsBits,
 } = require('discord.js');
@@ -31,18 +32,25 @@ async function postHostPanel(client) {
       '**Create** — open a new tournament\n' +
       '**Edit** — edit an open tournament\n' +
       '**Start** — lock registrations and begin tournament\n' +
-      '**End** — force-close a tournament',
+      '**End** — force-close a tournament\n\n' +
+      '**Teams** — view all teams\n' +
+      '**Edit Team** — add/remove members from a team',
     )
     .setColor(0xed4245);
 
-  const row = new ActionRowBuilder().addComponents(
+  const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('host_create').setLabel('Create').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('host_edit').setLabel('Edit').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('host_start').setLabel('Start').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('host_end').setLabel('End').setStyle(ButtonStyle.Danger),
   );
 
-  const payload = { embeds: [embed], components: [row] };
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('host_teams').setLabel('Teams').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('host_edit_team').setLabel('Edit Team').setStyle(ButtonStyle.Secondary),
+  );
+
+  const payload = { embeds: [embed], components: [row1, row2] };
 
   // Edit existing or post new
   const stateRow = db.getState.get('host_panel_message_id');
@@ -393,6 +401,216 @@ async function handleEnd(interaction) {
   return interaction.editReply({ content: `**${tournament.name}** closed.`, components: [] });
 }
 
+// --- Teams management (host) ---
+
+async function showAllTeams(interaction) {
+  if (!isHost(interaction)) {
+    return interaction.reply({ content: 'You need the **Host** role.', ephemeral: true });
+  }
+  await interaction.deferReply({ ephemeral: true });
+
+  const teams = db.getAllTeams.all();
+  if (teams.length === 0) {
+    return interaction.editReply('No teams exist.');
+  }
+
+  const lines = [];
+  for (const team of teams) {
+    const members = db.getTeamMembers.all(team.id);
+    const memberList = members.map(m => `<@${m.user_id}>${m.role === 'captain' ? ' ★' : ''}`).join(', ');
+    lines.push(`**${team.name}** (${members.length}/${team.size}) — ${memberList}`);
+  }
+
+  const description = lines.join('\n').slice(0, 4096);
+
+  const embed = new EmbedBuilder()
+    .setTitle(`All Teams (${teams.length})`)
+    .setDescription(description)
+    .setColor(0x3498db);
+
+  return interaction.editReply({ embeds: [embed] });
+}
+
+async function showEditTeamSelect(interaction) {
+  if (!isHost(interaction)) {
+    return interaction.reply({ content: 'You need the **Host** role.', ephemeral: true });
+  }
+  await interaction.deferReply({ ephemeral: true });
+
+  const teams = db.getAllTeams.all();
+  if (teams.length === 0) {
+    return interaction.editReply('No teams exist.');
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('host_team_select')
+      .setPlaceholder('Select a team')
+      .addOptions(teams.slice(0, 25).map(t => ({
+        label: `${t.name} (${t.size} players)`,
+        value: String(t.id),
+      }))),
+  );
+
+  return interaction.editReply({ content: 'Select a team to edit:', components: [row] });
+}
+
+async function handleTeamSelect(interaction) {
+  await interaction.deferUpdate();
+
+  const teamId = parseInt(interaction.values[0], 10);
+  const team = db.getTeam.get(teamId);
+  if (!team) return interaction.editReply({ content: 'Team not found.', components: [] });
+
+  const members = db.getTeamMembers.all(teamId);
+  const memberList = members.map(m => `<@${m.user_id}> ${m.role === 'captain' ? '(Captain)' : ''}`).join('\n');
+
+  const embed = new EmbedBuilder()
+    .setTitle(`Edit: ${team.name}`)
+    .setDescription(
+      `**Size:** ${team.size}\n` +
+      `**Members (${members.length}/${team.size}):**\n${memberList}`,
+    )
+    .setColor(0x3498db);
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`host_team_add:${teamId}`)
+      .setLabel('Add Member')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`host_team_kick:${teamId}`)
+      .setLabel('Remove Member')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId(`host_team_disband:${teamId}`)
+      .setLabel('Disband')
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  return interaction.editReply({ content: '', embeds: [embed], components: [row] });
+}
+
+async function showTeamAddUser(interaction, teamId) {
+  await interaction.deferUpdate();
+
+  const team = db.getTeam.get(parseInt(teamId, 10));
+  if (!team) return interaction.editReply({ content: 'Team not found.', embeds: [], components: [] });
+
+  const members = db.getTeamMembers.all(team.id);
+  if (members.length >= team.size) {
+    return interaction.editReply({ content: 'Team is full.', embeds: [], components: [] });
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new UserSelectMenuBuilder()
+      .setCustomId(`host_team_add_user:${team.id}`)
+      .setPlaceholder('Select user to add')
+      .setMinValues(1)
+      .setMaxValues(1),
+  );
+
+  return interaction.editReply({ content: `Add a member to **${team.name}**:`, embeds: [], components: [row] });
+}
+
+async function handleTeamAddUser(interaction, teamId) {
+  await interaction.deferUpdate();
+
+  const tid = parseInt(teamId, 10);
+  const team = db.getTeam.get(tid);
+  if (!team) return interaction.editReply({ content: 'Team not found.', components: [] });
+
+  const targetId = interaction.values[0];
+  const existing = db.getTeamMember.get(tid, targetId);
+  if (existing) {
+    return interaction.editReply({ content: 'User is already on this team.', components: [] });
+  }
+
+  const members = db.getTeamMembers.all(tid);
+  if (members.length >= team.size) {
+    return interaction.editReply({ content: 'Team is full.', components: [] });
+  }
+
+  db.insertTeamMember.run(tid, targetId, 'member');
+
+  // Add to tournaments the team is registered in
+  const teamTournaments = db.getTournamentsByTeam.all(tid);
+  for (const { tournament_id } of teamTournaments) {
+    const already = db.getParticipant.get(tournament_id, targetId);
+    if (!already) {
+      db.insertParticipant.run(tournament_id, targetId, tid);
+    }
+  }
+  if (teamTournaments.length > 0) {
+    await refreshTournamentsEmbed(interaction.client);
+  }
+
+  return interaction.editReply({ content: `<@${targetId}> added to **${team.name}**.`, embeds: [], components: [] });
+}
+
+async function showTeamKickSelect(interaction, teamId) {
+  await interaction.deferUpdate();
+
+  const tid = parseInt(teamId, 10);
+  const team = db.getTeam.get(tid);
+  if (!team) return interaction.editReply({ content: 'Team not found.', embeds: [], components: [] });
+
+  const members = db.getTeamMembers.all(tid);
+  if (members.length === 0) {
+    return interaction.editReply({ content: 'No members to remove.', embeds: [], components: [] });
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`host_team_kick_select:${tid}`)
+      .setPlaceholder('Select member to remove')
+      .addOptions(members.map(m => ({
+        label: m.user_id,
+        description: m.role,
+        value: m.user_id,
+      }))),
+  );
+
+  return interaction.editReply({ content: `Remove a member from **${team.name}**:`, embeds: [], components: [row] });
+}
+
+async function handleTeamKick(interaction, teamId) {
+  await interaction.deferUpdate();
+
+  const tid = parseInt(teamId, 10);
+  const team = db.getTeam.get(tid);
+  if (!team) return interaction.editReply({ content: 'Team not found.', components: [] });
+
+  const targetId = interaction.values[0];
+  db.removeTeamMember.run(tid, targetId);
+
+  // If captain was removed, transfer or disband
+  if (targetId === team.captain_id) {
+    const remaining = db.getTeamMembers.all(tid);
+    if (remaining.length === 0) {
+      db.deleteTeam.run(tid);
+      return interaction.editReply({ content: `<@${targetId}> removed. **${team.name}** disbanded (no members left).`, components: [] });
+    }
+    db.updateTeamCaptain.run(remaining[0].user_id, tid);
+    db.updateTeamMemberRole.run('captain', tid, remaining[0].user_id);
+  }
+
+  return interaction.editReply({ content: `<@${targetId}> removed from **${team.name}**.`, embeds: [], components: [] });
+}
+
+async function handleTeamDisband(interaction, teamId) {
+  await interaction.deferUpdate();
+
+  const tid = parseInt(teamId, 10);
+  const team = db.getTeam.get(tid);
+  if (!team) return interaction.editReply({ content: 'Team not found.', embeds: [], components: [] });
+
+  db.db.prepare('DELETE FROM team_members WHERE team_id = ?').run(tid);
+  db.deleteTeam.run(tid);
+
+  return interaction.editReply({ content: `Team **${team.name}** disbanded.`, embeds: [], components: [] });
+}
+
 // --- Voice channel helpers ---
 
 async function createTeamVoiceChannels(guild, tournament) {
@@ -451,4 +669,12 @@ module.exports = {
   handleCreateSubmit,
   handleStart,
   handleEnd,
+  showAllTeams,
+  showEditTeamSelect,
+  handleTeamSelect,
+  showTeamAddUser,
+  handleTeamAddUser,
+  showTeamKickSelect,
+  handleTeamKick,
+  handleTeamDisband,
 };

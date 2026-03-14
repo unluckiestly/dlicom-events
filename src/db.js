@@ -133,6 +133,8 @@ const getTeamsByUserAndSize = db.prepare(`
   WHERE tm.user_id = ? AND t.size = ?
 `);
 
+const getAllTeams = db.prepare(`SELECT * FROM teams ORDER BY created_at DESC`);
+
 const deleteTeam = db.prepare(`DELETE FROM teams WHERE id = ?`);
 
 // --- Team member queries ---
@@ -209,6 +211,7 @@ module.exports = {
   getTeamByName,
   getTeamsByUser,
   getTeamsByUserAndSize,
+  getAllTeams,
   deleteTeam,
   insertTeamMember,
   getTeamMembers,
