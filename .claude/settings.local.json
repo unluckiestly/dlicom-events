@@ -18,7 +18,8 @@
       "Bash(grep -ro \"setCustomId\\(\\\\`[^\\\\`]*\\\\`\\)\" /d/dlicom-events/src/handlers/*.js | sed \"s/setCustomId\\(\\\\`\\\\|\\\\`//g\" | head -15)",
       "Bash(grep -n \"getParticipantCount.get\" /d/dlicom-events/src/handlers/*.js)",
       "Bash(grep \"module.exports\" /d/dlicom-events/src/handlers/*.js)",
-      "Bash(cd D:/dlicom-events && node -e \"require\\('./src/handlers/bracket'\\); require\\('./src/handlers/hostPanel'\\); require\\('./src/events/interactionCreate'\\); console.log\\('OK'\\)\")"
+      "Bash(cd D:/dlicom-events && node -e \"require\\('./src/handlers/bracket'\\); require\\('./src/handlers/hostPanel'\\); require\\('./src/events/interactionCreate'\\); console.log\\('OK'\\)\")",
+      "Bash(cd D:/dlicom-events && gh auth status 2>&1)"
     ]
   }
 }
