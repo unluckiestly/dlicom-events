@@ -163,10 +163,10 @@ function showInviteModal(interaction, teamId) {
   modal.addComponents(
     new ActionRowBuilder().addComponents(
       new TextInputBuilder()
-        .setCustomId('invite_username')
-        .setLabel('Username')
+        .setCustomId('invite_user_id')
+        .setLabel('User ID (right-click user → Copy User ID)')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('e.g. player123')
+        .setPlaceholder('e.g. 244862047903285248')
         .setRequired(true),
     ),
   );
@@ -174,7 +174,7 @@ function showInviteModal(interaction, teamId) {
   return interaction.showModal(modal);
 }
 
-// --- Modal submit: find user by username and send DM invite ---
+// --- Modal submit: find user by ID and send DM invite ---
 
 async function handleInviteSubmit(interaction, teamId) {
   await interaction.deferReply({ ephemeral: true });
@@ -183,21 +183,24 @@ async function handleInviteSubmit(interaction, teamId) {
   const team = db.getTeam.get(tid);
   if (!team) return interaction.editReply('Team not found.');
 
-  const username = interaction.fields.getTextInputValue('invite_username').trim().toLowerCase();
+  const input = interaction.fields.getTextInputValue('invite_user_id').trim().replace(/[<@!>]/g, '');
 
-  // Search guild members by username
-  const members = await interaction.guild.members.fetch({ query: username, limit: 5 });
-  const target = members.find(m => m.user.username.toLowerCase() === username);
-
-  if (!target) {
-    return interaction.editReply(`User **${username}** not found on this server.`);
+  if (!/^\d+$/.test(input)) {
+    return interaction.editReply('Invalid User ID. Right-click a user → **Copy User ID**.');
   }
 
-  if (target.user.id === interaction.user.id) {
+  let target;
+  try {
+    target = await interaction.client.users.fetch(input);
+  } catch {
+    return interaction.editReply('User not found.');
+  }
+
+  if (target.id === interaction.user.id) {
     return interaction.editReply("You can't invite yourself.");
   }
 
-  const existing = db.getTeamMember.get(tid, target.user.id);
+  const existing = db.getTeamMember.get(tid, target.id);
   if (existing) {
     return interaction.editReply('That user is already on the team.');
   }
@@ -218,7 +221,7 @@ async function handleInviteSubmit(interaction, teamId) {
       content: `**${interaction.user.username}** invited you to join team **${team.name}** (${team.size} players).`,
       components: [row],
     });
-    return interaction.editReply(`Invite sent to **${target.user.username}**.`);
+    return interaction.editReply(`Invite sent to **${target.username}**.`);
   } catch {
     return interaction.editReply('Could not DM that user — they may have DMs disabled.');
   }
