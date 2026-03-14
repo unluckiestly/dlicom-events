@@ -17,11 +17,6 @@ module.exports = {
         return await routeStringSelect(interaction);
       }
 
-      // --- Select menus (user) ---
-      if (interaction.isUserSelectMenu()) {
-        return await routeUserSelect(interaction);
-      }
-
       // --- Modal submits ---
       if (interaction.isModalSubmit()) {
         return await routeModal(interaction);
@@ -62,7 +57,7 @@ async function routeButton(interaction) {
   if (id === 'team_my') return teamPanel.showMyTeams(interaction);
 
   if (id.startsWith('team_invite:')) {
-    return teamPanel.showInviteUserSelect(interaction, id.split(':')[1]);
+    return teamPanel.showInviteModal(interaction, id.split(':')[1]);
   }
   if (id.startsWith('team_kick:')) {
     return teamPanel.showKickSelect(interaction, id.split(':')[1]);
@@ -108,14 +103,6 @@ async function routeStringSelect(interaction) {
   }
 }
 
-async function routeUserSelect(interaction) {
-  const id = interaction.customId;
-
-  if (id.startsWith('team_invite_user:')) {
-    return teamPanel.handleInviteUser(interaction, id.split(':')[1]);
-  }
-}
-
 async function routeModal(interaction) {
   const id = interaction.customId;
 
@@ -124,5 +111,8 @@ async function routeModal(interaction) {
 
   if (id.startsWith('modal_edit_tournament:')) {
     return hostPanel.handleEditSubmit(interaction, id.split(':')[1]);
+  }
+  if (id.startsWith('modal_invite:')) {
+    return teamPanel.handleInviteSubmit(interaction, id.split(':')[1]);
   }
 }
